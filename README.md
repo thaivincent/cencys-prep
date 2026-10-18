@@ -74,3 +74,4 @@ python threads.py
 ```powershell
 py -c "import sqlite3; conn = sqlite3.connect('app.db'); print(conn.execute('SELECT * FROM scans LIMIT 5').fetchall()); conn.close()"
 ```
+
