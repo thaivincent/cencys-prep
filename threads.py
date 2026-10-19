@@ -22,7 +22,7 @@ class Job:
 @dataclass(frozen=True, slots=True)
 class DBWriteJob:
     query: str
-    params: tuple[str]
+    params: tuple[Any, ...]
     callback: Callable[[Any], None] | None = None
 
 def generateID(length = 5):
