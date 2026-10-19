@@ -11,7 +11,6 @@ import sqlite3
 SENTINEL = object()
 MAX_RETRIES = 3
 
-
 @dataclass(frozen=True, slots=True)
 class Job:
     id: str
@@ -36,7 +35,8 @@ def generateData(is_corrupt = False):
         "ip": f"192.168.1.{random.randint(1, 254)}",
         "port": random.choice([80, 443, 22, 8080]),
         "status": "OPEN",
-        "timestamp": time.time(),
+        "version": 1,
+        "updated_at": time.time(),
     }
     return json.dumps(payload).encode("utf-8")
 
@@ -65,13 +65,18 @@ def consumer(job_queue:queue.Queue, db_queue: queue.Queue) -> None:
             while current_task.retry_count <= MAX_RETRIES:
                 try:
                     safe_print(f"Consumer processing job: {current_task.id}, retry_count: {current_task.retry_count}")
-                    j = json.loads(task.payload.decode("utf-8"))
+                    j = json.loads(current_task.payload.decode("utf-8"))
 
                     #Create a dbjob and push to db_queue
-                    query = """INSERT INTO scans (id, ip, port, status, timestamp)
-                               VALUES (?, ?, ?, ?, ?)
+                    query = """ INSERT INTO scans (id, version, payload, updated_at)
+                                VALUES (?, ?, ?, ?)
+                                ON CONFLICT(id) DO UPDATE SET
+                                    version = excluded.version,
+                                    payload = excluded.payload,
+                                    updated_at = excluded.updated_at
+                                WHERE excluded.version >= scans.version;
                             """
-                    params = (current_task.id, j['ip'], j['port'],j['status'],j['timestamp'])
+                    params = (current_task.id, j["version"], current_task.payload.decode("utf-8"), j["updated_at"])
                     callback = current_task.on_success
 
                     writeJob = DBWriteJob(query=query, params=params, callback=callback)
@@ -99,10 +104,9 @@ def writer(db_file:str, db_queue:queue.Queue) -> None:
     with db:
         db.execute("""CREATE TABLE IF NOT EXISTS scans (
                         id TEXT PRIMARY KEY,
-                        ip TEXT,
-                        port INTEGER,
-                        status TEXT,
-                        timestamp REAL
+                        version INTEGER,
+                        payload TEXT,
+                        updated_at REAL
         );
         """)
     while True:
