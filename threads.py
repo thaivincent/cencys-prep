@@ -7,6 +7,9 @@ from dataclasses import dataclass, replace
 from typing import Callable, Any
 import json
 import sqlite3
+from scanner_stream import MockScannerStream
+from typing import Iterator
+from serializer import ScanRecord, unpackMessage
 
 SENTINEL = object()
 MAX_RETRIES = 3
@@ -28,27 +31,12 @@ class DBWriteJob:
 def generateID(length = 5):
     return "".join(random.choices(string.digits,k=length))
 
-def generateData(is_corrupt = False):
-    if is_corrupt:
-        return b"{malformed json}"
-    payload = {
-        "ip": f"192.168.1.{random.randint(1, 254)}",
-        "port": random.choice([80, 443, 22, 8080]),
-        "status": "OPEN",
-        "version": 1,
-        "updated_at": time.time(),
-    }
-    return json.dumps(payload).encode("utf-8")
-
-def producer(producer_id : int, count: int, q:queue.Queue) -> None:
-    for _ in range(count):
-        is_corrupt = (random.random() < 0.01)
+def producer(stream: Iterator[bytes], q:queue.Queue) -> None:
+    for packet in stream:
         task_id = generateID()
-        payload = generateData(is_corrupt)
-        f = lambda : safe_print("Successful write to DB")
+        f = lambda : safe_print("Success")
         f2 = lambda: safe_print("Failure")
-
-        job = Job(task_id, payload=payload, on_success=f, on_failure=f2)
+        job = Job(task_id, payload=packet, on_success=f, on_failure=f2)
         q.put(job)
 
 def consumer(job_queue:queue.Queue, db_queue: queue.Queue) -> None:
@@ -65,7 +53,7 @@ def consumer(job_queue:queue.Queue, db_queue: queue.Queue) -> None:
             while current_task.retry_count <= MAX_RETRIES:
                 try:
                     safe_print(f"Consumer processing job: {current_task.id}, retry_count: {current_task.retry_count}")
-                    j = json.loads(current_task.payload.decode("utf-8"))
+                    record = unpackMessage(current_task.payload)
 
                     #Create a dbjob and push to db_queue
                     query = """ INSERT INTO scans (id, version, payload, updated_at)
@@ -76,10 +64,9 @@ def consumer(job_queue:queue.Queue, db_queue: queue.Queue) -> None:
                                     updated_at = excluded.updated_at
                                 WHERE excluded.version >= scans.version;
                             """
-                    params = (current_task.id, j["version"], current_task.payload.decode("utf-8"), j["updated_at"])
-                    callback = current_task.on_success
+                    params = (record.id, record.version, json.dumps(record.to_dict()),record.updated_at)
 
-                    writeJob = DBWriteJob(query=query, params=params, callback=callback)
+                    writeJob = DBWriteJob(query=query, params=params, callback=current_task.on_success)
                     db_queue.put(writeJob)
                     time.sleep(random.uniform(.01,.05))
                     success = True
@@ -135,24 +122,21 @@ def safe_print(*args, **kwargs):
 
 def main():
     job_queue = queue.Queue(maxsize=10)
-    num_producers = 2
-    tasks_per_producer = 5
 
     db_queue = queue.Queue(maxsize=100)
     db_file = "app.db"
 
-    producers = [threading.Thread(target=producer, args=(i,tasks_per_producer,job_queue),name=f"Producer-{i}") for i in range(num_producers)]
+    stream = MockScannerStream()
+    producer_thread = threading.Thread(target=producer_thread, args=(stream,job_queue),name="Producer")
 
     consumer_thread = threading.Thread(target=consumer, args=(job_queue,db_queue,), name = "Consumer")
     writer_thread = threading.Thread(target=writer, args=(db_file,db_queue,), name = "DB Writer")
     
     consumer_thread.start()
     writer_thread.start()
-    for p in producers:
-        p.start()
 
-    for p in producers:
-        p.join()
+    producer_thread.start()
+    producer_thread.join()
 
     job_queue.put(SENTINEL)
     job_queue.join()
