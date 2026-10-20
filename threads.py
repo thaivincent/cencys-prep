@@ -127,7 +127,7 @@ def main():
     db_file = "app.db"
 
     stream = MockScannerStream()
-    producer_thread = threading.Thread(target=producer_thread, args=(stream,job_queue),name="Producer")
+    producer_thread = threading.Thread(target=producer, args=(stream,job_queue),name="Producer")
 
     consumer_thread = threading.Thread(target=consumer, args=(job_queue,db_queue,), name = "Consumer")
     writer_thread = threading.Thread(target=writer, args=(db_file,db_queue,), name = "DB Writer")
