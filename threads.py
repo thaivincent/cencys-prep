@@ -10,9 +10,18 @@ import sqlite3
 from scanner_stream import MockScannerStream
 from typing import Iterator
 from serializer import ScanRecord, unpackMessage
+import binascii
+import gzip
 
 SENTINEL = object()
 MAX_RETRIES = 3
+
+POISON_PILL_ERRORS = (binascii.Error,
+                      gzip.BadGzipFile,
+                      json.JSONDecodeError,
+                      ValueError
+)
+
 
 @dataclass(frozen=True, slots=True)
 class Job:
@@ -28,8 +37,24 @@ class DBWriteJob:
     params: tuple[Any, ...]
     callback: Callable[[Any], None] | None = None
 
+@dataclass(frozen=True, slots=True)
+class DLQJob:
+    id:str
+    payload: bytes
+    error: str
+    timestamp: float
+    retry_count:int
+
 def generateID(length = 5):
     return "".join(random.choices(string.digits,k=length))
+
+def sendToDLQ(job:Job, err:str, dlq:queue.Queue) -> None:
+    dlqjob = DLQJob(job.id, job.payload, err, time.time(), job.retry_count)
+    dlq.put(dlqjob)
+
+def expBackoff(job:Job) -> None:
+    retry_time = 0.05 * (2 ** job.retry_count)
+    time.sleep(retry_time)
 
 def producer(stream: Iterator[bytes], q:queue.Queue) -> None:
     for packet in stream:
@@ -39,7 +64,7 @@ def producer(stream: Iterator[bytes], q:queue.Queue) -> None:
         job = Job(task_id, payload=packet, on_success=f, on_failure=f2)
         q.put(job)
 
-def consumer(job_queue:queue.Queue, db_queue: queue.Queue) -> None:
+def consumer(job_queue:queue.Queue, db_queue: queue.Queue, dlq:queue.Queue) -> None:
     while True:
         task = job_queue.get()
         # using try..finally guarentees that the q.join() doesnt get stuck
@@ -72,11 +97,18 @@ def consumer(job_queue:queue.Queue, db_queue: queue.Queue) -> None:
                     success = True
                     break
                 except Exception as e:
-                    if current_task.retry_count < MAX_RETRIES:
+                    if isinstance(e,POISON_PILL_ERRORS):
+                        sendToDLQ(job=current_task, err=str(e), dlq=dlq)
+                        safe_print(f"Sent Job {current_task.id}, to dlq, error: {str(e)}")
+                        break
+
+                    elif current_task.retry_count < MAX_RETRIES:
                         current_task = replace(current_task, retry_count = current_task.retry_count + 1)
                         safe_print(f"Retrying Job {current_task.id}, attempt: {current_task.retry_count}")
-                        time.sleep(0.02)
+                        expBackoff(job=current_task)
                     else:
+                        sendToDLQ(job=current_task, err=str(e), dlq=dlq)
+                        safe_print(f"Sent Job {current_task.id}, to dlq, error: {str(e)}")
                         break
                 
             if not success and current_task.on_failure != None:
@@ -122,6 +154,7 @@ def safe_print(*args, **kwargs):
 
 def main():
     job_queue = queue.Queue(maxsize=10)
+    dead_letter_queue = queue.Queue(maxsize=100)
 
     db_queue = queue.Queue(maxsize=100)
     db_file = "app.db"
@@ -129,7 +162,7 @@ def main():
     stream = MockScannerStream()
     producer_thread = threading.Thread(target=producer, args=(stream,job_queue),name="Producer")
 
-    consumer_thread = threading.Thread(target=consumer, args=(job_queue,db_queue,), name = "Consumer")
+    consumer_thread = threading.Thread(target=consumer, args=(job_queue,db_queue,dead_letter_queue,), name = "Consumer")
     writer_thread = threading.Thread(target=writer, args=(db_file,db_queue,), name = "DB Writer")
     
     consumer_thread.start()
@@ -145,6 +178,11 @@ def main():
     db_queue.put(SENTINEL)
     db_queue.join()
     writer_thread.join()
+
+    safe_print(f"\n--- DLQ Audit Summary (Total: {dead_letter_queue.qsize()}) ---")
+    while not dead_letter_queue.empty():
+        dead_item = dead_letter_queue.get()
+        safe_print(f"  [DLQ Item] ID: {dead_item.id} | Retries: {dead_item.retry_count} | Error: {dead_item.error}")
 
 if __name__ == "__main__":
     main()    
