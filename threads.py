@@ -16,10 +16,11 @@ import gzip
 SENTINEL = object()
 MAX_RETRIES = 3
 
-POISON_PILL_ERRORS = (binascii.Error,
-                      gzip.BadGzipFile,
-                      json.JSONDecodeError,
-                      ValueError
+POISON_PILL_ERRORS = (
+    binascii.Error,
+    gzip.BadGzipFile,
+    json.JSONDecodeError,
+    ValueError
 )
 
 
@@ -138,8 +139,8 @@ def writer(db_file:str, db_queue:queue.Queue) -> None:
             with db:
                 cursor.execute(write_job.query, write_job.params)
                 time.sleep(random.uniform(.01,.05))
-                if write_job.callback != None:
-                    write_job.callback()
+            if write_job.callback != None:
+                write_job.callback()
         except Exception as e:
             safe_print(f"[DB Error] {e}")
         finally:
@@ -160,23 +161,25 @@ def main():
     db_file = "app.db"
 
     stream = MockScannerStream()
+    
     producer_thread = threading.Thread(target=producer, args=(stream,job_queue),name="Producer")
-
     consumer_thread = threading.Thread(target=consumer, args=(job_queue,db_queue,dead_letter_queue,), name = "Consumer")
     writer_thread = threading.Thread(target=writer, args=(db_file,db_queue,), name = "DB Writer")
     
     consumer_thread.start()
     writer_thread.start()
-
     producer_thread.start()
+    
     producer_thread.join()
-
+    
     job_queue.put(SENTINEL)
     job_queue.join()
+
     consumer_thread.join()
 
     db_queue.put(SENTINEL)
     db_queue.join()
+
     writer_thread.join()
 
     safe_print(f"\n--- DLQ Audit Summary (Total: {dead_letter_queue.qsize()}) ---")

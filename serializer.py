@@ -78,6 +78,7 @@ def packMessage(schema : int, compression : CompressionType, record : ScanRecord
             pass
         case _:
             raise ValueError(f"Unsuported Compression Type: {compression}" )
+        #Encode into base64, then do a string conversion 
     b64_str = base64.b64encode(compressed).decode("ascii")
     
     return Envelope(schema_version=schema, compression=compression.name.lower(), data=b64_str).to_bytes()
@@ -85,6 +86,7 @@ def packMessage(schema : int, compression : CompressionType, record : ScanRecord
 # Takes bytes, turns it into an envelope, then turns it into its appropriate scan record schema
 def unpackMessage(data:bytes) -> ScanRecord:
     envelope = Envelope.from_bytes(data)
+    #b64decode works on strings AND bytes so no need to do an extra conversion
     compressedBytes = base64.b64decode(envelope.data)
     raw_bytes = compressedBytes
 

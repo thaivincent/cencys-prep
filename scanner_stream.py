@@ -75,7 +75,7 @@ class MockScannerStream:
         # Bad Base64 (corrupted transport frame)
         if self.generated == 5:
             corrupt_envelope = {
-                "envelope_version": 1,
+                "schema_version": 1,
                 "compression": "gzip",
                 "data": "!!!corrupted_base64_data@@@",
             }
@@ -85,7 +85,7 @@ class MockScannerStream:
         if self.generated == 12:
             fake_b64 = base64.b64encode(b"not_a_real_gzip_stream").decode("ascii")
             corrupt_envelope = {
-                "envelope_version": 1,
+                "schema_version": 1,
                 "compression": "gzip",
                 "data": fake_b64,
             }
