@@ -1,4 +1,4 @@
-# Censys Technical Interview Prep (Target Date: Oct 22, 2026)
+# Censys Technical Interview Prep
 
 High-throughput, concurrent data ingestion pipeline built in Python with thread-safe queues, immutable dataclasses, and single-writer SQLite WAL persistence.
 
@@ -42,17 +42,17 @@ High-throughput, concurrent data ingestion pipeline built in Python with thread-
   - Safe transaction boundaries using `with db:`
   - Structured `DBWriteJob(query, params, callback)` message envelope
   - Cascading two-stage shutdown sequence
-- [ ] **Day 4 (Oct 18): Schema Design, Parameterization & Atomic Upserts**
+- [x] **Day 4 (Oct 18): Schema Design, Parameterization & Atomic Upserts**
   - Modern SQLite upsert syntax: `INSERT INTO ... ON CONFLICT(id) DO UPDATE SET ... WHERE ...`
   - Version checks in upserts (`WHERE excluded.version >= scans.version` or `timestamp`)
   - Out-of-order write rejection unit tests
-- [ ] **Day 5 (Oct 19): Serialization, Base64 & Safe Decompression**
+- [x] **Day 5 (Oct 19): Serialization, Base64 & Safe Decompression**
   - Binary stream decompression (`gzip.decompress()`) and Base64 schema envelopes
   - Schema evolution: unpacking versioned envelopes
-- [ ] **Day 6 (Oct 20): Failure Modes, DLQ & At-Least-Once Delivery**
+- [x] **Day 6 (Oct 20): Failure Modes, DLQ & At-Least-Once Delivery**
   - Dead-Letter Queue (DLQ) routing for poison pills
   - Database lock handling with exponential backoff
-- [ ] **Day 7 (Oct 21): Full Pipeline Mock Simulation & Review**
+- [x] **Day 7 (Oct 21): Full Pipeline Mock Simulation & Review**
   - End-to-end 90-minute simulation combining all components
 
 ---
